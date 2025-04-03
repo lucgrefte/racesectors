@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Key Sectors</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 1em; }
+    h1 { text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1em; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background-color: #f2f2f2; }
+    .controls { margin-bottom: 1em; text-align: center; }
+    .hidden { display: none; }
+    .wind-arrow { display: inline-block; width: 16px; height: 16px; transform-origin: center; }
+    .wind-arrow svg { width: 100%; height: 100%; transform: rotate(0deg); }
+  </style>
+</head>
+<body>
+  <h1 id="raceTitle">Key Sectors</h1>
+
+  <div class="controls">
+    <label><input type="checkbox" checked id="showClimbs"> Climbs</label>
+    <label><input type="checkbox" checked id="showCobbles"> Cobbled Sectors</label>
+    <label><input type="checkbox" checked id="showSprints"> Intermediate Sprints</label>
+    <label><input type="checkbox" id="showTowns"> Town Markers</label>
+    <br><br>
+    <label>Start time: <input type="time" id="startTime" value="12:30"></label>
+    <label>Avg. speed (km/h): <input type="number" id="avgSpeed" value="44" min="10" max="60"></label>
+    <button id="fetchWeather">Fetch Weather</button>
+  </div>
+
+  <table id="sectorsTable">
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Name</th>
+        <th>Start (km to go)</th>
+        <th>End (km to go)</th>
+        <th>ETA</th>
+        <th>Icon</th>
+        <th>Temp (°C)</th>
+        <th>Wind (km/h)</th>
+        <th>Wind Arrow</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const arrowSVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l6 8h-4v12h-4V10H6z" fill="black"/></svg>`;
+  </script>
+
+  <script>
+    const tableBody = document.querySelector('#sectorsTable tbody');
+    const titleEl = document.getElementById('raceTitle');
+    const typeMap = {
+      'stageclimbs': 'Climb',
+      'stagecobbles': 'Cobbled Sector',
+      'stagesprints': 'Sprint',
+      'stagegenericsprints': 'Town',
+      'start': 'Start',
+      'finish': 'Finish'
+    };
+    const visibility = {
+      'stageclimbs': true,
+      'stagecobbles': true,
+      'stagesprints': true,
+      'stagegenericsprints': false,
+      'start': true,
+      'finish': true
+    };
+
+    document.getElementById('showClimbs').onchange = e => toggleType('stageclimbs', e.target.checked);
+    document.getElementById('showCobbles').onchange = e => toggleType('stagecobbles', e.target.checked);
+    document.getElementById('showSprints').onchange = e => toggleType('stagesprints', e.target.checked);
+    document.getElementById('showTowns').onchange = e => toggleType('stagegenericsprints', e.target.checked);
+
+    function toggleType(type, show) {
+      visibility[type] = show;
+      document.querySelectorAll(`tr[data-type*="${type}"]`).forEach(row => {
+        row.style.display = show ? '' : 'none';
+      });
+    }
+
+    function calculateETA(kmToGo, routeLength, startTime, avgSpeed) {
+      const elapsedHours = (routeLength - kmToGo) / avgSpeed;
+      return new Date(startTime.getTime() + elapsedHours * 3600000);
+    }
+
+    function bearing(lat1, lon1, lat2, lon2) {
+      const toRad = deg => deg * Math.PI / 180;
+      const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+      const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    const weatherEmojis = { 0: '☀️', 1: '🌤️', 2: '⛅', 3: '☁️', 45: '🌫️', 48: '🌫️',
+      51: '🌦️', 53: '🌦️', 55: '🌧️', 56: '🌧️', 57: '🌧️',
+      61: '🌧️', 63: '🌧️', 65: '🌧️', 66: '🌧️', 67: '🌧️',
+      71: '❄️', 73: '❄️', 75: '❄️', 77: '❄️',
+      80: '🌦️', 81: '🌧️', 82: '🌧️', 95: '⛈️', 96: '⛈️', 99: '⛈️'
+    };
+
+    fetch('stage_data.json')
+      .then(res => res.json())
+      .then(data => {
+        titleEl.textContent = data.trackname + ' Key Sectors';
+
+        const routeLength = parseFloat(data.trackdistance);
+        const mergedSectors = [];
+        const routeCoords = data.route.map(p => [parseFloat(p.position.k), parseFloat(p.position.A)]);
+
+        if (routeCoords.length > 1) {
+          const start = routeCoords[0];
+          const end = routeCoords[routeCoords.length - 1];
+          mergedSectors.push({
+            name: data.trackdepart,
+            startKmToGo: routeLength,
+            endKmToGo: routeLength,
+            types: new Set(['start']),
+            lat: start[0], lon: start[1]
+          });
+          mergedSectors.push({
+            name: data.trackarrive,
+            startKmToGo: 0,
+            endKmToGo: 0,
+            types: new Set(['finish']),
+            lat: end[0], lon: end[1]
+          });
+        }
+
+        const processSectors = (points, type) => {
+          (points || []).forEach(point => {
+            let d1 = parseFloat(point.startdistance ?? point.distance);
+            let d2 = parseFloat(point.distance);
+            const startKmToGo = routeLength - d1;
+            const endKmToGo = routeLength - d2;
+            const lat = parseFloat(point.location?.A);
+            const lon = parseFloat(point.location?.F);
+
+            mergedSectors.push({
+              name: decodeURIComponent(point.name || ''),
+              startKmToGo,
+              endKmToGo,
+              types: new Set([type]),
+              lat, lon
+            });
+          });
+        };
+
+        ['stageclimbs', 'stagecobbles', 'stagesprints', 'stagegenericsprints'].forEach(type => {
+          processSectors(data.sprints?.[type], type);
+        });
+
+        mergedSectors.sort((a, b) => b.startKmToGo - a.startKmToGo);
+
+        const startInput = document.getElementById('startTime');
+        const speedInput = document.getElementById('avgSpeed');
+
+        const updateTable = () => {
+          const [hours, minutes] = startInput.value.split(":" ).map(Number);
+          const startTime = new Date();
+          startTime.setHours(hours, minutes, 0, 0);
+          const avgSpeed = parseFloat(speedInput.value);
+
+          tableBody.innerHTML = '';
+          mergedSectors.forEach(sector => {
+            const eta = calculateETA(sector.startKmToGo, routeLength, startTime, avgSpeed);
+            sector.eta = eta;
+            const row = document.createElement('tr');
+            row.dataset.type = Array.from(sector.types).join(',');
+            row.dataset.lat = sector.lat;
+            row.dataset.lon = sector.lon;
+            row.dataset.eta = eta.toISOString();
+            row.dataset.startKm = sector.startKmToGo;
+            row.innerHTML = `
+              <td>${Array.from(sector.types).map(t => typeMap[t] || t).join(', ')}</td>
+              <td>${sector.name}</td>
+              <td>${sector.startKmToGo.toFixed(1)}</td>
+              <td>${sector.endKmToGo.toFixed(1)}</td>
+              <td>${eta.toTimeString().slice(0, 5)}</td>
+              <td class="weather-icon">⏳</td>
+              <td class="weather-temp">⏳</td>
+              <td class="weather-wind">⏳</td>
+              <td class="weather-arrow">⏳</td>
+            `;
+            row.style.display = Array.from(sector.types).some(t => visibility[t]) ? '' : 'none';
+            tableBody.appendChild(row);
+          });
+        };
+
+        document.getElementById('fetchWeather').onclick = async () => {
+          const rows = tableBody.querySelectorAll('tr');
+          for (const row of rows) {
+            const lat = parseFloat(row.dataset.lat), lon = parseFloat(row.dataset.lon);
+            if (isNaN(lat) || isNaN(lon)) continue;
+            const eta = new Date(row.dataset.eta);
+            const isoDate = eta.toISOString().split('T')[0];
+            const resp = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,windspeed_10m,weathercode,winddirection_10m&timezone=auto&start_date=${isoDate}&end_date=${isoDate}`);
+            const forecast = await resp.json();
+            const times = forecast.hourly.time;
+            const temp = forecast.hourly.temperature_2m;
+            const wind = forecast.hourly.windspeed_10m;
+            const dir = forecast.hourly.winddirection_10m;
+            const code = forecast.hourly.weathercode;
+
+            const matchIdx = times.findIndex(t => {
+              const forecastDate = new Date(t);
+              return (
+                forecastDate.getHours() === eta.getHours() &&
+                forecastDate.getDate() === eta.getDate() &&
+                forecastDate.getMonth() === eta.getMonth()
+              );
+            });
+
+            if (matchIdx !== -1) {
+              row.querySelector('.weather-icon').textContent = weatherEmojis[code[matchIdx]] || '❓';
+              row.querySelector('.weather-temp').textContent = `${Math.round(temp[matchIdx])}°C`;
+              row.querySelector('.weather-wind').textContent = `${Math.round(wind[matchIdx])} km/h`;
+
+              const i = Math.floor((routeCoords.length - 1) * (1 - (parseFloat(row.dataset.startKm) / routeLength)));
+              const routeHeading = i < routeCoords.length - 1 ? bearing(...routeCoords[i], ...routeCoords[i + 1]) : 0;
+              const windFrom = dir[matchIdx];
+              const relativeAngle = (windFrom - routeHeading + 360) % 360;
+              row.querySelector('.weather-arrow').innerHTML = `
+                <span class="wind-arrow" style="transform: rotate(${relativeAngle}deg);">
+                  <svg viewBox="0 0 24 24"><path d="M12 2L5 20h14L12 2z" fill="black"/></svg>
+                </span>`;
+            }
+          }
+        };
+
+        startInput.addEventListener('change', updateTable);
+        speedInput.addEventListener('change', updateTable);
+        updateTable();
+      });
+  </script>
+</body>
+</html>
