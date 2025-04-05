@@ -26,6 +26,14 @@
     <br><br>
     <label>Start time: <input type="time" id="startTime" value="12:30"></label>
     <label>Avg. speed (km/h): <input type="number" id="avgSpeed" value="44" min="10" max="60"></label>
+    <label>Select forecast date:
+      <select id="forecastDate">
+        <option value="2025-04-06">2025-04-06</option>
+        <option value="2025-04-07">2025-04-07</option>
+        <option value="2025-04-08">2025-04-08</option>
+        <!-- Add more dates as necessary -->
+      </select>
+    </label>
     <button id="fetchWeather">Fetch Weather</button>
   </div>
 
@@ -157,6 +165,7 @@
 
         const startInput = document.getElementById('startTime');
         const speedInput = document.getElementById('avgSpeed');
+        const dateInput = document.getElementById('forecastDate'); // New dropdown
 
         const updateTable = () => {
           const [hours, minutes] = startInput.value.split(":" ).map(Number);
@@ -192,11 +201,12 @@
 
         document.getElementById('fetchWeather').onclick = async () => {
           const rows = tableBody.querySelectorAll('tr');
+          const selectedDate = dateInput.value; // Get the selected date
           for (const row of rows) {
             const lat = parseFloat(row.dataset.lat), lon = parseFloat(row.dataset.lon);
             if (isNaN(lat) || isNaN(lon)) continue;
             const eta = new Date(row.dataset.eta);
-            const isoDate = eta.toISOString().split('T')[0];
+            const isoDate = selectedDate; // Use selected date from dropdown
             const resp = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&models=ecmwf_ifs025&hourly=temperature_2m,windspeed_10m,weathercode,winddirection_10m&timezone=auto&start_date=${isoDate}&end_date=${isoDate}`);
             const forecast = await resp.json();
             const times = forecast.hourly.time;
@@ -224,6 +234,7 @@
               const windFrom = dir[matchIdx];
               const relativeAngle = (windFrom - routeHeading + 360) % 360;
               row.querySelector('.weather-arrow').innerHTML = `
+
                 <span class="wind-arrow" style="transform: rotate(${relativeAngle}deg);">
                   <svg viewBox="0 0 24 24"><path d="M12 2L5 20h14L12 2z" fill="black"/></svg>
                 </span>`;
