@@ -197,7 +197,7 @@
             if (isNaN(lat) || isNaN(lon)) continue;
             const eta = new Date(row.dataset.eta);
             const isoDate = eta.toISOString().split('T')[0];
-            const resp = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,windspeed_10m,weathercode,winddirection_10m&timezone=auto&start_date=${isoDate}&end_date=${isoDate}`);
+            const resp = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&models=ecmwf_ifs025&hourly=temperature_2m,windspeed_10m,weathercode,winddirection_10m&timezone=auto&start_date=${isoDate}&end_date=${isoDate}`);
             const forecast = await resp.json();
             const times = forecast.hourly.time;
             const temp = forecast.hourly.temperature_2m;
